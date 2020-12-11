@@ -1,9 +1,6 @@
 program integrator 
-   use module_pl
    use, intrinsic :: iso_fortran_env ! Use the intrinsic kind definitions
    implicit none
-   ! Arguments
-   type(user_input_parameters)  :: param    ! derived type containing user-defined parameters
    ! Internals 
    integer, parameter :: P = real64
    real(P) :: e, inc, long, varpi, PI, f, mu, om, a, argr, argv
@@ -12,7 +9,7 @@ program integrator
    real(P) :: year, timestep, tfinal 
    CHARACTER (len = 4) :: argu
    real(P), dimension(3) :: h, r, v , ecc , n, vcrossh, z
-   type(planet) :: pl
+
    year = 24_P*3600_P*365_P
    timestep = 1_P * year
    half_timestep = 0.5_P * timestep
@@ -28,6 +25,7 @@ program integrator
    real(P),     dimension(:,:),     allocatable :: ah
    end type planet 
 
+   type(planet) :: pl
    id2 = [3.3473818717761439E-01,-2.1061105379199779E-01,-4.7921461216598432E-02, 9.4572394374496608E-03, 2.5106125757836419E-02, 1.1835934147070429E-03, 1.651e-07]
    id3 = [-4.6411665443250860E-01, 5.4731602408177948E-01, 3.4285183291441222E-02,-1.5497531935705990E-02,-1.3190815340356370E-02, 7.1366857195630977E-04, 2.447e-06]
    id4 = [7.8447422290361046E-01, 6.0834664588920739E-01,-1.9969120829822830E-05,-1.0818280103689040E-02, 1.3526750837437910E-02, 2.3301627510155490E-07, 3.003e-06]
@@ -71,9 +69,9 @@ program integrator
 
    DO i = 1, timestep, tfinal 
       !convert to barycentric coordinates 
-      xbtot = (/ 0.0_DP, 0.0_DP, 0.0_DP /)
-      vbtot = (/ 0.0_DP, 0.0_DP, 0.0_DP /)
-      ptot =  (/ 0.0_DP, 0.0_DP, 0.0_DP /)
+      xbtot = (/ 0.0_P, 0.0_P, 0.0_P /)
+      vbtot = (/ 0.0_P, 0.0_P, 0.0_P /)
+      ptot =  (/ 0.0_P, 0.0_P, 0.0_P /)
       mtot = 0_P
       DO j = 2, npl 
          mtot = mtot + pl%mass
@@ -132,7 +130,7 @@ program integrator
 
 
       ! Sun momemtum drift at half_timestep and planet drift 
-      ptot =  (/ 0.0_DP, 0.0_DP, 0.0_DP /)
+      ptot =  (/ 0.0_P, 0.0_P, 0.0_P /)
       DO j = 2, npl 
          ptot = pl%vb(:,i)*pl%mass(i) +xbtot
       END DO
@@ -142,7 +140,7 @@ program integrator
          pl%xh(:,i) = pl%xh(:,i) + ptot
       END DO 
       !convert vb into vh 
-      vbtot = (/ 0.0_DP, 0.0_DP, 0.0_DP /)
+      vbtot = (/ 0.0_P, 0.0_P, 0.0_P /)
       DO j = 2 , npl
          vbtot = vbtot * pl%mass(i)*pl%vb(:,i)
       END DO 
@@ -205,24 +203,21 @@ end program
       integer, parameter :: P = real64
       real(P), dimension(3), intent(in) :: x,v
       real(P), dimension(3), intent(out) :: xnew, vnew
-      real(P) :: P, a, ecc, f, varpi, xperi, yperi, sE, cE
+      real(P) :: Period, a, ecc, f, varpi, xperi, yperi, sE, cE
       real(P) :: E, E0, dE, M, t, telapsed
       integer :: n, nsteps  ! The number of steps to generate output
-      nsteps = size(xv,2)
+      nsteps = 10
       ! Convert cartesian initial conditions to orbital elements 
       call xv2el(x,v,a,ecc,f,varpi)
-      P = 2 * pi * sqrt(a**3) 
-      ! First rotate the position of the orbit into pericenter-aligned coordinates
-      xperi = x(1) * cos(-varpi) - x(2) * sin(-varpi)
-      yperi = x(1) * sin(-varpi) + x(2) * cos(-varpi)
-      sE = yperi / (a * sqrt(1._DP - ecc**2))
-      cE = xperi / a + ecc
-      E = atan2(sE, cE) 
+      Period = 2 * pi * sqrt(a**3) 
+      sE = SQRT(1-ecc**2)*sin(f)/(1+ecc*cos(f))
+      cE = (ecc + cos(f)) /(1+ecc*cos(e))
+      E = atan2(sE, cE)  
       M = E - ecc * sin(E)
       n = 10
       DO i = 1, nsteps
       t = (n - 1) * dt 
-      telapsed = mod(t, P)
+      telapsed = mod(t, Period)
       M = (telapsed / P) * 2 * pi 
       ! Update eccentric anomaly (solve Kepler's equation)
       E = danby_solver(M, ecc)
@@ -238,13 +233,13 @@ end program
       integer, parameter :: P = real64
       real(P), intent(in) :: M, ecc
       real(P) :: E
-      real(P), parameter :: tol = epsilon(M)
+      real(P), parameter :: tol = 1e-6_P
       integer, parameter :: imax = 1000
-      real(P), parameter :: k = 0.85_DP
+      real(P), parameter :: k = 0.85_P
       real(P) :: Eold, dE
-      integer :: i
+      integer :: k
       E = M + sign(k * ecc, sin(M))
-      do i = 1, imax
+      do k = 1, imax
          Eold = E
          E = danby_step(M, ecc, E)
          dE = abs(E - Eold)
@@ -262,13 +257,13 @@ end program
       real(P) :: f, fp, fpp, fppp
 
       f = E - ecc * sin(E) - M
-      fp = 1._DP - ecc * cos(E)
+      fp = 1._P - ecc * cos(E)
       fpp = ecc * sin(E)
       fppp = ecc * cos(E)
 
       d1 = -f / fp
-      d2 = -f / (fp + d1 * fpp / 2._DP)
-      d3 = -f / (fp + d2 * fpp / 2._DP + d2**2 * fppp / 6._DP)
+      d2 = -f / (fp + d1 * fpp / 2._P)
+      d3 = -f / (fp + d2 * fpp / 2._P + d2**2 * fppp / 6._P)
 
       Enew = E + d3
       return
@@ -292,15 +287,15 @@ end program
       n = sqrt(a**(-3)) ! Mean motion
       r0 = norm2(x0(:))
 
-      f = a / r0 * (cos(dE) - 1._DP) + 1._DP
-      g = dt + 1._DP / n * (sin(dE) - dE)
+      f = a / r0 * (cos(dE) - 1._P) + 1._P
+      g = dt + 1._P / n * (sin(dE) - dE)
 
       x(:) = f * x0(:) + g * v0(:)
 
       r = norm2(x(:))
 
       fdot = -(a**2 * n / (r * r0) ) * sin(dE)
-      gdot = (a / r) * (cos(dE) - 1._DP) + 1._DP
+      gdot = (a / r) * (cos(dE) - 1._P) + 1._P
 
       v(:) = fdot * x0(:) + gdot * v0(:)
 
@@ -318,12 +313,12 @@ end program
       REAL(P)     :: r, v2, hx, hy, hz, h2, h, rdotv, energy, capm, fac, u, w, cw, sw, face, cape, tmpf, capf
          
       ! Executable code
-      a = 0.0_DP
-      e = 0.0_DP
-      inc = 0.0_DP
-      capom = 0.0_DP
-      omega = 0.0_DP
-      capm = 0.0_DP
+      a = 0.0_P
+      e = 0.0_P
+      inc = 0.0_P
+      capom = 0.0_P
+      omega = 0.0_P
+      capm = 0.0_P
       r = SQRT(DOT_PRODUCT(x(:), x(:)))
       v2 = DOT_PRODUCT(v(:), v(:))
       hx = x(2)*v(3) - x(3)*v(2)
@@ -331,42 +326,42 @@ end program
       hz = x(1)*v(2) - x(2)*v(1)
       h2 = hx*hx + hy*hy + hz*hz
       h = SQRT(h2)
-      IF (h2 == 0.0_DP) RETURN
+      IF (h2 == 0.0_P) RETURN
       rdotv = DOT_PRODUCT(x(:), v(:))
-      energy = 0.5_DP*v2 - mu/r
+      energy = 0.5_P*v2 - mu/r
       fac = hz/h
-      IF (fac < -1.0_DP) THEN
+      IF (fac < -1.0_P) THEN
            inc = PI
-      ELSE IF (fac < 1.0_DP) THEN
+      ELSE IF (fac < 1.0_P) THEN
            inc = ACOS(fac)
       END IF
       fac = SQRT(hx*hx + hy*hy)/h
       IF (fac**2 < VSMALL) THEN
            u = ATAN2(x(2), x(1))
-           IF (hz < 0.0_DP) u = -u
+           IF (hz < 0.0_P) u = -u
       ELSE
            capom = ATAN2(hx, -hy)
            u = ATAN2(x(3)/SIN(inc), x(1)*COS(capom) + x(2)*SIN(capom))
       END IF
-      IF (capom < 0.0_DP) capom = capom + TWOPI
-      IF (u < 0.0_DP) u = u + TWOPI
+      IF (capom < 0.0_P) capom = capom + TWOPI
+      IF (u < 0.0_P) u = u + TWOPI
 
-       fac = 1.0_DP - h2/(mu*a)
+       fac = 1.0_P - h2/(mu*a)
       IF (fac > VSMALL) THEN
          e = SQRT(fac)
-         cape = 0.0_DP
+         cape = 0.0_P
          face = (a - r)/(a*e)
-         IF (face < -1.0_DP) THEN
+         IF (face < -1.0_P) THEN
             cape = PI
-         ELSE IF (face < 1.0_DP) THEN
+         ELSE IF (face < 1.0_P) THEN
             cape = ACOS(face)
          END IF
-         IF (rdotv < 0.0_DP) cape = TWOPI - cape
-         fac = 1.0_DP - e*COS(cape)
+         IF (rdotv < 0.0_P) cape = TWOPI - cape
+         fac = 1.0_P - e*COS(cape)
          cw = (COS(cape) - e)/fac
-         sw = SQRT(1.0_DP - e*e)*SIN(cape)/fac
+         sw = SQRT(1.0_P - e*e)*SIN(cape)/fac
          w = ATAN2(sw, cw)
-         IF (w < 0.0_DP) w = w + TWOPI
+         IF (w < 0.0_P) w = w + TWOPI
       ELSE
          cape = u
          w = u
@@ -375,7 +370,7 @@ end program
           
       omega = u - w
       f = w 
-      IF (omega < 0.0_DP) omega = omega + TWOPI
+      IF (omega < 0.0_P) omega = omega + TWOPI
       varpi = capom + omega
       RETURN 
          
