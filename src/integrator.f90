@@ -26,9 +26,9 @@ program integrator
 
    cadence = 1
    year = 24_P*3600_P*365_P
-   timestep = 1_P * year
+   timestep = 0.1_P * year
    half_timestep = 0.5_P * timestep
-   tfinal = 1000000_P*year
+   tfinal = 0.2_P*year
    ! inputs 
 
    ! id2 = [3.3473818717761439E-01,-2.1061105379199779E-01,-4.7921461216598432E-02, &
@@ -88,19 +88,21 @@ program integrator
 
 
    pl%id(1) = 1 
-   pl%mass(1) = 1_P
+   pl%xh(:,1) = (/ 0.0_P, 0.0_P, 0.0_P /)
+   pl%vh(:,1) = (/ 0.0_P, 0.0_P, 0.0_P /)
+   pl%mass(1) = 1.0_P
 
    do i = 2,npl
       pl%id(i) = i
 
-      pl%xh(1,i) = pl_list(i,1)
-      pl%xh(2,i) = pl_list(i,2)
-      pl%xh(3,i) = pl_list(i,3)
-
-      pl%vh(1,i) = pl_list(i,1)
-      pl%vh(1,i) = pl_list(i,1)
-      pl%vh(1,i) = pl_list(i,1)
-      pl%mass(i) = pl_list(i,7)
+      pl%xh(1,i) = pl_list(i-1,1)
+      pl%xh(2,i) = pl_list(i-1,2)
+      pl%xh(3,i) = pl_list(i-1,3)
+      pl%ah(:,i) = (/ 0.0_P, 0.0_P, 0.0_P /)
+      pl%vh(1,i) = pl_list(i-1,1)
+      pl%vh(2,i) = pl_list(i-1,1)
+      pl%vh(3,i) = pl_list(i-1,1)
+      pl%mass(i) = pl_list(i-1,7)
    enddo
    
    open(10,file='mercury.out', action = 'write')
@@ -118,80 +120,104 @@ program integrator
       xbtot = (/ 0.0_P, 0.0_P, 0.0_P /)
       vbtot = (/ 0.0_P, 0.0_P, 0.0_P /)
       ptot =  (/ 0.0_P, 0.0_P, 0.0_P /)
-      mtot = 0_P
+      mtot = 0._P
 
-      pl%ah = 0_P
+      pl%ah = 0._P
 
       DO i = 2, npl 
          mtot = mtot + pl%mass(i)
-         xbtot =  pl%xh(:,i)*pl%mass(i) +xbtot
-         vbtot = pl%vh(:,i)*pl%mass(i) +xbtot
+         xbtot =  pl%xh(:,i)*pl%mass(i) + xbtot
+         vbtot = pl%vh(:,i)*pl%mass(i) + vbtot
       END DO 
-
-      ptot = xbtot
+      write(*,*) "xh earth init", pl%xh(:,4)
       xbtot =  - xbtot / mtot 
       vbtot = -vbtot / mtot 
-      ptot = xbtot * half_timestep / pl%mass(1)
+      
       pl%xb(:,1) = xbtot 
       pl%vb(:,1) = vbtot 
-      
+      write(*,*) "vb sun init", pl%xh(:,1)
       DO i = 2, npl 
          pl%xb(:,i) = pl%xh(:,i) + xbtot
          pl%vb(:,i) = pl%vh(:,i) + vbtot
+         ptot = ptot + pl%vb(:,i)*pl%mass(i)
       END DO 
-
-
+      ptot = ptot * half_timestep / pl%mass(1)
+      write(*,*) "ptot sun drift", ptot 
+      write(*,*) "vb earth ", pl%vb(:,4)
       ! Sun momemtum drift at half_timestep 
       DO i = 2, npl 
          pl%xh(:,i) = pl%xh(:,i) + ptot
       END DO 
 
-
+      write(*,*) "xh earth after sun drift", pl%xh(:,4)
       !! kick due to interactions of all bodies except Sun 
+
       DO j = 2, npl 
          DO k = 2, npl 
             dx(:) = pl%xh(:,k) - pl%xh(:,j)
             rplpl = dot_product(dx,dx)
-            pl%ah(:,j) = pl%ah(:,j) + pl%mass(k)*dx(:)/rplpl**(3./2.)
-            ! pl%ah(:,k) = pl%ah(:,k) - pl%mass(j)*faci*dx(:)/rplpl**(3_P/2_P)
-            pl%ah(:,k) = pl%ah(:,k) - pl%mass(j)*dx(:)/rplpl**(3./2.)
+            if (rplpl > 0.0_P) then 
+               write(*,*) rplpl, j, k 
+               pl%ah(:,j) = pl%ah(:,j) + pl%mass(k)*dx(:)*(1.0_P/SQRT(rplpl)/rplpl)**(3.0_P)
+               ! pl%ah(:,k) = pl%ah(:,k) - pl%mass(j)*faci*dx(:)/rplpl**(3_P/2_P)
+               pl%ah(:,k) = pl%ah(:,k) - pl%mass(j)*dx(:)*(1.0_P/SQRT(rplpl)/rplpl)**(3.0_P)
+            end if 
          END DO 
       END DO 
-   
+
       DO j = 2, npl 
          pl%vb(:,j) = pl%vb(:,j) + pl%ah(:,j)*half_timestep
       END DO 
 
-
+      write(*,*) "vb earth after acc calc", pl%vb(:,4)
 
       !! Danby drift of all bodies  at timestep 
-      DO j = 2, npl 
-         call drift_danby(pl%xh(:,i),pl%vh(:,i),xnew,vnew, half_timestep)
+      DO i = 2, npl 
+         call drift_danby(pl%xh(:,i),pl%vb(:,i),xnew,vnew, half_timestep)
+         write(*,*) "xnew", xnew 
          pl%xh(:,i) = xnew 
-         pl%vh(:,i) = vnew
-      END DO 
+         pl%vb(:,i) = vnew
+      END DO  
+      do i=2, npl
+         write(*,*) "xh pl after danby", pl%xh(:,i)
+      end do 
+      write(*,*) "vb earth after danby", pl%vb(:,4)
+
 
 
       ! Kick at half_timestep
+      !! kick due to interactions of all bodies except Sun 
+      Do i = 2, npl
+         pl%ah(:,i) = (/ 0.0_P, 0.0_P, 0.0_P /)
+      end do 
+
       DO j = 2, npl 
          DO k = 2, npl 
             dx(:) = pl%xh(:,k) - pl%xh(:,j)
             rplpl = dot_product(dx,dx)
-            pl%ah(:,j) = pl%ah(:,j) + pl%mass(k)*dx(:)/rplpl**(3._P/2._P)
-            pl%ah(:,k) = pl%ah(:,k) - pl%mass(j)*dx(:)/rplpl**(3._P/2._P)
+            if (rplpl > 0.0_P) then 
+               write(*,*) rplpl, j, k 
+               write(*,*) "acc earth", pl%ah(:,4)
+               pl%ah(:,j) = pl%ah(:,j) + pl%mass(k)*dx(:)*(1.0_P/SQRT(rplpl)/rplpl)**(3.0_P)
+               ! pl%ah(:,k) = pl%ah(:,k) - pl%mass(j)*faci*dx(:)/rplpl**(3_P/2_P)
+               pl%ah(:,k) = pl%ah(:,k) - pl%mass(j)*dx(:)*(1.0_P/SQRT(rplpl)/rplpl)**(3.0_P)
+               write(*,*) "acc earth after calc", pl%ah(:,4), pl%mass(j), dx(:), (1.0_P/SQRT(rplpl)/rplpl)**(3.0_P)
+            end if 
          END DO 
       END DO 
-
+      write(*,*) "acc earth", pl%ah(:,4)
       DO j = 2, npl 
          pl%vb(:,j) = pl%vb(:,j) + pl%ah(:,j)*half_timestep
-      END DO  
+      END DO 
 
+
+      write(*,*) "vb earth after 2nd kick ", pl%vb(:,4)
 
 
       ! Sun momemtum drift at half_timestep and planet drift 
       ptot =  (/ 0.0_P, 0.0_P, 0.0_P /)
-      DO j = 2, npl 
-         ptot = pl%vb(:,i)*pl%mass(i) +xbtot
+      DO i = 2, npl 
+         ptot = pl%vb(:,i)*pl%mass(i) + ptot
       END DO
       ptot = ptot * half_timestep / pl%mass(1)
 
@@ -200,14 +226,14 @@ program integrator
       END DO 
       !convert vb into vh 
       vbtot = (/ 0.0_P, 0.0_P, 0.0_P /)
-      DO j = 2 , npl
+      DO i = 2 , npl
          vbtot = vbtot * pl%mass(i)*pl%vb(:,i)
       END DO 
       vbtot = vbtot / pl%mass(1) 
-      DO j = 2, npl 
+      DO i = 2, npl 
          pl%vh(:,i) = pl%vb(:,i) + vbtot
       END DO 
-
+      write(*,*) "vh earth end", pl%vh(:,4)
   
 
       !! output 
