@@ -3,13 +3,13 @@ program integrator
    implicit none
    ! Internals 
    integer, parameter :: P = real64
-   real(P) :: e, inc, long, varpi, PI, f, mu, om, a, argr, argv
+   real(P) :: e, inc, long, varpi, PI, f, mu, om, a, argr, argv, sdebug
    integer :: iarg, w, npl,i,j,k, cadence
    logical :: new 
-   real(P) :: year, timestep, tfinal, half_timestep, time, mtot, rplpl
+   real(P) :: year, timestep, tfinal, half_timestep, time, mtot, rplpl, G, time_conversion
    CHARACTER (len = 4) :: argu
    real(P), dimension(3) :: h, r, v , ecc , n, vcrossh, z, dx, xbtot, vbtot, ptot
-   real(P), dimension(3) :: xnew, vnew
+   real(P), dimension(3) :: xnew, vnew, vdebug 
    real(P), dimension(7) :: id2, id3, id4, id5, id6, id7, id8, id9, id10
    real(P), dimension(9, 7) :: pl_list
    ! type 
@@ -23,12 +23,13 @@ program integrator
    real(P),     dimension(:,:),     allocatable :: ah
    end type planet 
    type(planet) :: pl
-
+   G = 4.0_P*pi**2.0_P
    cadence = 1
    year = 24_P*3600_P*365_P
    timestep = 0.1_P * year
    half_timestep = 0.5_P * timestep
    tfinal = 0.2_P*year
+   time_conversion = 1.0_P / year
    ! inputs 
 
    ! id2 = [3.3473818717761439E-01,-2.1061105379199779E-01,-4.7921461216598432E-02, &
@@ -99,12 +100,16 @@ program integrator
       pl%xh(2,i) = pl_list(i-1,2)
       pl%xh(3,i) = pl_list(i-1,3)
       pl%ah(:,i) = (/ 0.0_P, 0.0_P, 0.0_P /)
-      pl%vh(1,i) = pl_list(i-1,1)
-      pl%vh(2,i) = pl_list(i-1,1)
-      pl%vh(3,i) = pl_list(i-1,1)
+      pl%vh(1,i) = pl_list(i-1,4)
+      pl%vh(2,i) = pl_list(i-1,5)
+      pl%vh(3,i) = pl_list(i-1,6)
       pl%mass(i) = pl_list(i-1,7)
    enddo
+   call cross(pl%xh(:,2), pl%vh(:,2), vdebug)
+   sdebug = dot_product(vdebug,vdebug)
+   write(*,*) "h mercury", vdebug, "h scalar", sdebug
    
+
    open(10,file='mercury.out', action = 'write')
    open(11,file='venus.out', action = 'write')
    open(12,file='earth.out', action = 'write')
@@ -129,27 +134,27 @@ program integrator
          xbtot =  pl%xh(:,i)*pl%mass(i) + xbtot
          vbtot = pl%vh(:,i)*pl%mass(i) + vbtot
       END DO 
-      write(*,*) "xh earth init", pl%xh(:,4)
+      write(*,*) "xh mercury init", pl%xh(:,2)
+      write(*,*) "vh mercury init", pl%vh(:,2)
       xbtot =  - xbtot / mtot 
       vbtot = -vbtot / mtot 
       
       pl%xb(:,1) = xbtot 
       pl%vb(:,1) = vbtot 
-      write(*,*) "vb sun init", pl%xh(:,1)
+
       DO i = 2, npl 
          pl%xb(:,i) = pl%xh(:,i) + xbtot
          pl%vb(:,i) = pl%vh(:,i) + vbtot
          ptot = ptot + pl%vb(:,i)*pl%mass(i)
       END DO 
-      ptot = ptot * half_timestep / pl%mass(1)
-      write(*,*) "ptot sun drift", ptot 
-      write(*,*) "vb earth ", pl%vb(:,4)
+      ptot = ptot * half_timestep * time_conversion / pl%mass(1)
+
       ! Sun momemtum drift at half_timestep 
       DO i = 2, npl 
          pl%xh(:,i) = pl%xh(:,i) + ptot
       END DO 
 
-      write(*,*) "xh earth after sun drift", pl%xh(:,4)
+      write(*,*) "xh  mercury after sun drift", pl%xh(:,2)
       !! kick due to interactions of all bodies except Sun 
 
       DO j = 2, npl 
@@ -158,22 +163,23 @@ program integrator
             rplpl = dot_product(dx,dx)
             if (rplpl > 0.0_P) then 
                write(*,*) rplpl, j, k 
-               pl%ah(:,j) = pl%ah(:,j) + pl%mass(k)*dx(:)*(1.0_P/SQRT(rplpl)/rplpl)**(3.0_P)
+               pl%ah(:,j) = pl%ah(:,j) + pl%mass(j)*G*dx(:)*(1.0_P/SQRT(rplpl)/rplpl)**(3.0_P)
                ! pl%ah(:,k) = pl%ah(:,k) - pl%mass(j)*faci*dx(:)/rplpl**(3_P/2_P)
-               pl%ah(:,k) = pl%ah(:,k) - pl%mass(j)*dx(:)*(1.0_P/SQRT(rplpl)/rplpl)**(3.0_P)
+               pl%ah(:,k) = pl%ah(:,k) - pl%mass(k)*G*dx(:)*(1.0_P/SQRT(rplpl)/rplpl)**(3.0_P)
             end if 
          END DO 
       END DO 
 
       DO j = 2, npl 
-         pl%vb(:,j) = pl%vb(:,j) + pl%ah(:,j)*half_timestep
+         pl%vb(:,j) = pl%vb(:,j) + pl%ah(:,j)*half_timestep*time_conversion
       END DO 
 
-      write(*,*) "vb earth after acc calc", pl%vb(:,4)
+      write(*,*) "xh mercury after acc calc", pl%xh(:,2)
+      write(*,*) "vb mercury after acc calc", pl%vb(:,2)
 
       !! Danby drift of all bodies  at timestep 
       DO i = 2, npl 
-         call drift_danby(pl%xh(:,i),pl%vb(:,i),xnew,vnew, half_timestep)
+         call drift_danby(pl%xh(:,i),pl%vb(:,i),xnew,vnew, half_timestep*time_conversion)
          write(*,*) "xnew", xnew 
          pl%xh(:,i) = xnew 
          pl%vb(:,i) = vnew
@@ -181,7 +187,7 @@ program integrator
       do i=2, npl
          write(*,*) "xh pl after danby", pl%xh(:,i)
       end do 
-      write(*,*) "vb earth after danby", pl%vb(:,4)
+      write(*,*) "vb mercury after danby", pl%vb(:,2)
 
 
 
@@ -198,16 +204,16 @@ program integrator
             if (rplpl > 0.0_P) then 
                write(*,*) rplpl, j, k 
                write(*,*) "acc earth", pl%ah(:,4)
-               pl%ah(:,j) = pl%ah(:,j) + pl%mass(k)*dx(:)*(1.0_P/SQRT(rplpl)/rplpl)**(3.0_P)
+               pl%ah(:,j) = pl%ah(:,j) + pl%mass(j)*G*dx(:)*(1.0_P/SQRT(rplpl)/rplpl)**(3.0_P)
                ! pl%ah(:,k) = pl%ah(:,k) - pl%mass(j)*faci*dx(:)/rplpl**(3_P/2_P)
-               pl%ah(:,k) = pl%ah(:,k) - pl%mass(j)*dx(:)*(1.0_P/SQRT(rplpl)/rplpl)**(3.0_P)
+               pl%ah(:,k) = pl%ah(:,k) - pl%mass(k)*G*dx(:)*(1.0_P/SQRT(rplpl)/rplpl)**(3.0_P)
                write(*,*) "acc earth after calc", pl%ah(:,4), pl%mass(j), dx(:), (1.0_P/SQRT(rplpl)/rplpl)**(3.0_P)
             end if 
          END DO 
       END DO 
       write(*,*) "acc earth", pl%ah(:,4)
       DO j = 2, npl 
-         pl%vb(:,j) = pl%vb(:,j) + pl%ah(:,j)*half_timestep
+         pl%vb(:,j) = pl%vb(:,j) + pl%ah(:,j)*half_timestep*time_conversion
       END DO 
 
 
@@ -219,7 +225,7 @@ program integrator
       DO i = 2, npl 
          ptot = pl%vb(:,i)*pl%mass(i) + ptot
       END DO
-      ptot = ptot * half_timestep / pl%mass(1)
+      ptot = ptot * half_timestep*time_conversion / pl%mass(1)
 
       DO i = 2, npl 
          pl%xh(:,i) = pl%xh(:,i) + ptot
@@ -263,18 +269,18 @@ program integrator
 
 end program 
  
-!    subroutine cross(x, v, xcrossv)
-!       use, intrinsic :: iso_fortran_env
-!       implicit none 
-!       integer, parameter :: P = real64
-!       real(P), dimension(3), intent(in) :: x,v
-!       real(P), dimension(3), intent(out) :: xcrossv 
+    subroutine cross(x, v, xcrossv)
+       use, intrinsic :: iso_fortran_env
+       implicit none 
+       integer, parameter :: P = real64
+       real(P), dimension(3), intent(in) :: x,v
+       real(P), dimension(3), intent(out) :: xcrossv 
    
-!       xcrossv(1) = x(2)*v(3) - x(3)*v(2)
-!       xcrossv(2) = x(3)*v(1) - x(1)*v(3)
-!       xcrossv(3) = x(1)*v(2) - x(2)*v(1)
+       xcrossv(1) = x(2)*v(3) - x(3)*v(2)
+       xcrossv(2) = x(3)*v(1) - x(1)*v(3)
+       xcrossv(3) = x(1)*v(2) - x(2)*v(1)
    
-!    end subroutine 
+    end subroutine 
 
 
 !    subroutine kick(x, v, xnew,vnew)
@@ -295,6 +301,7 @@ end program
       ! Uses the f and g functions to solve for the cartesian position and velocity as a function of
       implicit none
       integer, parameter :: P = real64
+      real(P), parameter :: pi = 3.1415927
       real(P), intent(in) :: a  ! semimajor axis and change in eccentric anomaly
       real(P), intent(in) :: dE ! Change in eccentric anomaly in one step
       real(P), intent(in) :: dt ! Step size
@@ -306,7 +313,7 @@ end program
       allocate(x0, source=x)
       allocate(v0, source=v)
 
-      n = sqrt(a**(-3)) ! Mean motion
+      n = sqrt(4*pi**2.0_P / a**(-3.0_P)) ! Mean motion
       r0 = norm2(x0(:))
 
       f = a / r0 * (cos(dE) - 1._P) + 1._P
@@ -316,7 +323,7 @@ end program
 
       r = norm2(x(:))
 
-      fdot = -(a**2 * n / (r * r0) ) * sin(dE)
+      fdot = -(a**2.0_P * n / (r * r0) ) * sin(dE)
       gdot = (a / r) * (cos(dE) - 1._P) + 1._P
 
       v(:) = fdot * x0(:) + gdot * v0(:)
@@ -338,7 +345,7 @@ end program
       REAL(P)     :: r, v2, hx, hy, hz, h2, h, rdotv, energy, capm, fac, u, w, cw, sw, face, cape, tmpf, capf
          
       ! Executable code
-      mu = 1.0_P
+      mu = 4.0_P*(pi**2.0_P)
       a = 0.0_P
       e = 0.0_P
       inc = 0.0_P
@@ -352,17 +359,19 @@ end program
       hz = x(1)*v(2) - x(2)*v(1)
       h2 = hx*hx + hy*hy + hz*hz
       h = SQRT(h2)
-      IF (h2 == 0.0_P) RETURN
+      write(*,*) "h = ", h 
       rdotv = DOT_PRODUCT(x(:), v(:))
       energy = 0.5_P*v2 - mu/r
+      a = -0.5_P*mu/energy
       fac = hz/h
+      write(*,*) "energy = ", energy 
       IF (fac < -1.0_P) THEN
            inc = pi
       ELSE IF (fac < 1.0_P) THEN
            inc = ACOS(fac)
       END IF
       fac = SQRT(hx*hx + hy*hy)/h
-      IF (fac**2 < VSMALL) THEN
+      IF (fac**2 < 1.0E-30_P) THEN
            u = ATAN2(x(2), x(1))
            IF (hz < 0.0_P) u = -u
       ELSE
@@ -372,27 +381,27 @@ end program
       IF (capom < 0.0_P) capom = capom + TWOPI
       IF (u < 0.0_P) u = u + TWOPI
 
-       fac = 1.0_P - h2/(mu*a)
-      IF (fac > VSMALL) THEN
+      fac = 1.0_P - h2/(mu*a)
+      IF (fac > 1.0E-30_P) THEN
          e = SQRT(fac)
          cape = 0.0_P
          face = (a - r)/(a*e)
          IF (face < -1.0_P) THEN
-            cape = PI
+            cape = pi
          ELSE IF (face < 1.0_P) THEN
             cape = ACOS(face)
          END IF
-         IF (rdotv < 0.0_P) cape = TWOPI - cape
-         fac = 1.0_P - e*COS(cape)
-         cw = (COS(cape) - e)/fac
-         sw = SQRT(1.0_P - e*e)*SIN(cape)/fac
-         w = ATAN2(sw, cw)
-         IF (w < 0.0_P) w = w + TWOPI
+       IF (rdotv < 0.0_P) cape = 2.0_p*pi - cape
+       fac = 1.0_P - e*COS(cape)
+       cw = (COS(cape) - e)/fac
+       sw = SQRT(1.0_P - e*e)*SIN(cape)/fac
+       w = ATAN2(sw, cw)
+       IF (w < 0.0_P) w = w + TWOPI
       ELSE
          cape = u
          w = u
       END IF
-      capm = cape - e*SIN(cape)
+      capm = cape - e*SIN(cape)           
           
       omega = u - w
       f = w 
@@ -409,26 +418,31 @@ end program
       REAL(P), PARAMETER :: pi = 3.1415927
       real(P), dimension(3), intent(in) :: x,v
       real(P), dimension(3), intent(out) :: xnew, vnew
-      real(P) :: Period, a, ecc, f, varpi, xperi, yperi, sE, cE
-      real(P) :: E, E0, dE, M, t, telapsed, dt, inc, capom
-      integer :: i, n, nsteps  ! The number of steps to generate output
+      real(P) :: Period, a, ecc, f, varpi, sE, cE
+      real(P) :: E, M, t, telapsed, dt, inc, capom
+      integer :: i, nsteps  ! The number of steps to generate output
       nsteps = 10
       ! Convert cartesian initial conditions to orbital elements 
       call xv2el(x,v,a,ecc,f,varpi,inc,capom)
-      Period = 2 * pi * sqrt(a**3) 
-      sE = SQRT(1-ecc**2)*sin(f)/(1+ecc*cos(f))
-      cE = (ecc + cos(f)) /(1+ecc*cos(e))
+      write(*,*) "a,ecc,f,varpi, inc, capom, pi", a,ecc,f,varpi,inc,capom, pi
+      Period = 2.0_P * pi * sqrt(a**3.0_P) 
+      sE = SQRT(1.0_P-ecc**2.0_P)*sin(f)/(1+ecc*cos(f))
+      cE = (ecc + cos(f)) /(1+ecc*cos(f))
+      write(*,*) "sE , cE", sE, cE 
       E = atan2(sE, cE)  
+      write(*,*) "Einit =", E
       M = E - ecc * sin(E)
-      n = 10
-      DO i = 1, nsteps
-      t = (n - 1) * dt 
-      telapsed = mod(t, Period)
-      M = (telapsed / P) * 2 * pi 
-      ! Update eccentric anomaly (solve Kepler's equation)
-      E = danby_solver(M, ecc)
-      ! Compute new cartesian position and velocity vectors
-      call Etoxv(a, E, telapsed, xnew, vnew)
+      DO i = 2, nsteps
+         t = (i - 1) * dt 
+         telapsed = mod(t, Period)
+         write(*,*) "telapsed, period", telapsed, Period
+         M = (telapsed / Period) * 2.0_P * pi 
+         write(*,*) "M =", M 
+         ! Update eccentric anomaly (solve Kepler's equation)
+         E = danby_solver(M, ecc)
+         write(*,*) "E =", E 
+         ! Compute new cartesian position and velocity vectors
+         call Etoxv(a, E, telapsed, xnew, vnew)
       end do
 
       return
@@ -446,12 +460,14 @@ end program
          real(P) :: Eold, dE
          integer :: i
          E = M + sign(k * ecc, sin(M))
+         write(*,*) "E start solver", E 
          do i = 1, imax
             Eold = E
             E = danby_step(M, ecc, E)
             dE = abs(E - Eold)
             if (dE < tol) exit
          end do
+         write(*,*) "E end solver", E 
          return
       end function danby_solver
    
@@ -470,7 +486,7 @@ end program
    
          d1 = -f / fp
          d2 = -f / (fp + d1 * fpp / 2._P)
-         d3 = -f / (fp + d2 * fpp / 2._P + d2**2 * fppp / 6._P)
+         d3 = -f / (fp + d2 * fpp / 2._P + d2**2.0_P * fppp / 6._P)
    
          Enew = E + d3
          return
