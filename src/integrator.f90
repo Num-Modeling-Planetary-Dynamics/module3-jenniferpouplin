@@ -134,8 +134,8 @@ program integrator
       xbtot =  - xbtot / mtot 
       vbtot = -vbtot / mtot 
       
-      pl%xb(:,1) = xbtot 
-      pl%vb(:,1) = vbtot 
+      pl%xb(:,1) = xbtot * mtot
+      pl%vb(:,1) = vbtot * mtot 
 
       DO i = 2, npl 
          pl%xb(:,i) = pl%xh(:,i) + xbtot
@@ -402,24 +402,24 @@ end program
       real(P) :: E, M,  telapsed, dt, inc, capom, alpha, dM, ec, es, esq
       integer :: i ! The number of steps to generate output
       ! Convert cartesian initial conditions to orbital elements 
-      !call xv2el(x,v,a,ecc,f,varpi,inc,capom)
-      GM = 4.0_P/pi**2.0_P
+      call xv2el(x,v,a,ecc,f,varpi,inc,capom)
+      GM = 4.0_P*pi**2.0_P
       alpha = 2.0_P * GM / norm2(x) - dot_product(v,v)
       a = GM/alpha
       n = sqrt(GM/a**3.0_P)
-      !Period = 2.0_P * pi * sqrt(a**3.0_P/GM) 
+      Period = 2.0_P * pi * sqrt(a**3.0_P/GM) 
       ec = 1.0_P - norm2(x)/a 
       es = dot_product(x,x)/(n*a**2.0_P)
       esq = ec*ec + es*es
       dM = dt*n - INT(dt*n/2/pi)*2*pi
-      !sE = SQRT(1.0_P-ecc**2.0_P)*sin(f)/(1+ecc*cos(f))
-      !cE = (ecc + cos(f)) /(1+ecc*cos(f))
-      !E = atan2(sE, cE)  
+      sE = SQRT(1.0_P-ecc**2.0_P)*sin(f)/(1+ecc*cos(f))
+      cE = (ecc + cos(f)) /(1+ecc*cos(f))
+      E = atan2(sE, cE)  
       write(*,*) "Einit =", E
-      !M = E - ecc * sin(E)
+      M = E - ecc * sin(E)
       !telapsed = mod(dt, Period)
       !M = M + (telapsed / Period) * 2.0_P * pi 
-      M = mod(M+dm, 2*pi)
+      M = mod(M+dM, 2*pi)
       ! Update eccentric anomaly (solve Kepler's equation)
       E = danby_solver(M, sqrt(esq))
       write(*,*) "E =", E 
